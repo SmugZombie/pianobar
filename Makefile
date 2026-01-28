@@ -32,7 +32,8 @@ PIANOBAR_SRC:=\
 		${PIANOBAR_DIR}/ui_act.c \
 		${PIANOBAR_DIR}/ui.c \
 		${PIANOBAR_DIR}/ui_readline.c \
-		${PIANOBAR_DIR}/ui_dispatch.c
+		${PIANOBAR_DIR}/ui_dispatch.c \
+		${PIANOBAR_DIR}/web.c
 PIANOBAR_OBJ:=${PIANOBAR_SRC:.c=.o}
 
 LIBPIANO_DIR:=src/libpiano
@@ -61,15 +62,30 @@ LIBJSONC_LDFLAGS:=$(shell $(PKG_CONFIG) --libs json-c 2>/dev/null || $(PKG_CONFI
 LIBAO_CFLAGS:=$(shell $(PKG_CONFIG) --cflags ao)
 LIBAO_LDFLAGS:=$(shell $(PKG_CONFIG) --libs ao)
 
+LIBMICROHTTPD_CFLAGS:=$(shell $(PKG_CONFIG) --cflags libmicrohttpd 2>/dev/null || echo "")
+LIBMICROHTTPD_LDFLAGS:=$(shell $(PKG_CONFIG) --libs libmicrohttpd 2>/dev/null || echo "")
+
+# Check if libmicrohttpd is available
+ifeq ($(shell $(PKG_CONFIG) --exists libmicrohttpd && echo yes),yes)
+	HAVE_MICROHTTPD:=1
+else
+	HAVE_MICROHTTPD:=0
+endif
+
 # combine all flags
 ALL_CFLAGS:=${CFLAGS} -I ${LIBPIANO_INCLUDE} \
 			${LIBAV_CFLAGS} ${LIBCURL_CFLAGS} \
 			${LIBGCRYPT_CFLAGS} ${LIBJSONC_CFLAGS} \
-			${LIBAO_CFLAGS}
+			${LIBAO_CFLAGS} ${LIBMICROHTTPD_CFLAGS}
 ALL_LDFLAGS:=${LDFLAGS} -lpthread -lm \
 			${LIBAV_LDFLAGS} ${LIBCURL_LDFLAGS} \
 			${LIBGCRYPT_LDFLAGS} ${LIBJSONC_LDFLAGS} \
-			${LIBAO_LDFLAGS}
+			${LIBAO_LDFLAGS} ${LIBMICROHTTPD_LDFLAGS}
+
+# Add HAVE_MICROHTTPD define if available
+ifeq ($(HAVE_MICROHTTPD),1)
+	ALL_CFLAGS+= -DHAVE_MICROHTTPD
+endif
 
 # Be verbose if V=1 (gnu autotools’ --disable-silent-rules)
 SILENTCMD:=@
@@ -118,7 +134,8 @@ clean:
 	${SILENTECHO} " CLEAN"
 	${SILENTCMD}${RM} ${PIANOBAR_OBJ} ${LIBPIANO_OBJ} \
 			${LIBPIANO_RELOBJ} pianobar libpiano.so* \
-			libpiano.a $(PIANOBAR_SRC:.c=.d) $(LIBPIANO_SRC:.c=.d)
+			libpiano.a $(PIANOBAR_SRC:.c=.d) $(LIBPIANO_SRC:.c=.d) \
+			src/web.o src/web.d
 
 all: pianobar
 

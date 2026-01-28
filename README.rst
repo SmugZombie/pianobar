@@ -18,6 +18,7 @@ Features
 - upcoming songs/song history
 - customize keybindings and text output (see `configuration example`_)
 - remote control and eventcmd interface (send tracks to last.fm_, for example)
+- web interface for remote control from any device on your network
 - proxy support for listeners outside the USA
 
 .. _last.fm: https://www.last.fm
@@ -174,10 +175,12 @@ You need the following software to build pianobar:
 - json-c
 - ffmpeg ≤ 5.1 [2]_
 - UTF-8 console/locale
+- libmicrohttpd [3]_ (optional, for web interface)
 
 .. [1] with blowfish cipher enabled
 .. [2] required: demuxer mov, decoder aac, protocol http and filters volume,
         aformat, aresample
+.. [3] required only if you want to use the web interface feature
 
 Then type::
 
@@ -190,6 +193,40 @@ You can run the client directly from the source directory now::
 Or install it to ``/usr/local`` by issuing::
 
 	gmake install
+
+Web Interface
+-------------
+
+pianobar includes an optional web interface that allows you to control playback
+from any device on your network through a web browser. The web interface provides:
+
+- Real-time display of current track information (title, artist, album, station)
+- Playback controls (skip, love, ban, pause/resume)
+- Station selection and switching
+- Time information (elapsed/total)
+- Player state (playing, paused, stopped)
+
+To enable the web interface, add the following to your pianobar configuration file
+(``~/.config/pianobar/config``)::
+
+	web_enabled = 1
+	web_port = 8080
+
+After starting pianobar, access the web interface at ``http://localhost:8080`` (or
+``http://<your-ip>:8080`` from other devices on your network).
+
+The web interface also provides a REST API for programmatic access:
+
+- ``GET /api/status`` - Get current track info and player state
+- ``GET /api/stations`` - List all available stations
+- ``POST /api/skip`` - Skip the current song
+- ``POST /api/love`` - Love the current song
+- ``POST /api/ban`` - Ban the current song
+- ``POST /api/pause`` - Toggle pause/resume playback
+- ``POST /api/station`` - Change station (requires JSON: ``{"id":"station_id"}``)
+
+Note: The web interface requires libmicrohttpd to be installed. If libmicrohttpd is
+not available, pianobar will build without the web interface feature.
 
 FAQ
 ---

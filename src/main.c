@@ -56,6 +56,7 @@ THE SOFTWARE.
 #include "ui.h"
 #include "ui_dispatch.h"
 #include "ui_readline.h"
+#include "web.h"
 
 /*	authenticate user
  */
@@ -501,11 +502,21 @@ int main (int argc, char **argv) {
 			app.input.fds[1];
 	++app.input.maxfd;
 
+	/* initialize web interface */
+	BarWebInit(&app);
+	if (app.settings.webEnabled) {
+		BarWebStart();
+	}
+
 	BarMainLoop (&app);
 
 	if (app.input.fds[1] != -1) {
 		close (app.input.fds[1]);
 	}
+
+	/* stop web interface */
+	BarWebStop();
+	BarWebDestroy();
 
 	/* write statefile */
 	BarSettingsWrite (app.curStation, &app.settings);

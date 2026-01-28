@@ -188,6 +188,8 @@ void BarSettingsRead (BarSettings_t *settings) {
 	settings->audioPipe = NULL;
 	assert (settings->fifo != NULL);
 	settings->sampleRate = 0; /* default to stream sample rate */
+	settings->webPort = 8080; /* default web server port */
+	settings->webEnabled = false; /* web interface disabled by default */
 
 	settings->msgFormat[MSG_NONE].prefix = NULL;
 	settings->msgFormat[MSG_NONE].postfix = NULL;
@@ -404,6 +406,10 @@ void BarSettingsRead (BarSettings_t *settings) {
 				settings->autoselect = atoi (val);
 			} else if (streq ("sample_rate", key)) {
 				settings->sampleRate = atoi (val);
+			} else if (streq ("web_port", key)) {
+				settings->webPort = atoi (val);
+			} else if (streq ("web_enabled", key)) {
+				settings->webEnabled = atoi (val) != 0;
 			} else if (strncmp (formatMsgPrefix, key,
 					strlen (formatMsgPrefix)) == 0) {
 				static const char *mapping[] = {"none", "info", "nowplaying",

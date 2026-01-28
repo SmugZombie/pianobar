@@ -106,6 +106,8 @@ typedef struct {
 	char *audioPipe;
 	char keys[BAR_KS_COUNT];
 	int sampleRate;
+	unsigned int webPort;
+	bool webEnabled;
 	BarMsgFormatStr_t msgFormat[MSG_COUNT];
 } BarSettings_t;
 
