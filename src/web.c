@@ -176,7 +176,24 @@ static const char *html_frontend =
 "function loveSong() { fetch('/api/love', {method: 'POST'}).then(() => setTimeout(updateStatus, 500)); }\n"
 "function banSong() { fetch('/api/ban', {method: 'POST'}).then(() => setTimeout(updateStatus, 500)); }\n"
 "function togglePause() { fetch('/api/pause', {method: 'POST'}).then(() => setTimeout(updateStatus, 500)); }\n"
-"function changeStation(id) { fetch('/api/station', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: id})}).then(() => { setTimeout(updateStatus, 500); setTimeout(updateStations, 500); }); }\n"
+"function changeStation(id) { \n"
+"console.log('Changing station to:', id);\n"
+"fetch('/api/station', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: id})})\n"
+".then(r => r.json())\n"
+".then(data => {\n"
+"console.log('Station change response:', data);\n"
+"if (data.success) {\n"
+"setTimeout(updateStatus, 500);\n"
+"setTimeout(updateStations, 500);\n"
+"} else {\n"
+"alert('Failed to change station: ' + (data.error || 'Unknown error'));\n"
+"}\n"
+"})\n"
+".catch(err => {\n"
+"console.error('Station change error:', err);\n"
+"alert('Error changing station: ' + err.message);\n"
+"});\n"
+"}\n"
 "updateStatus();\n"
 "updateStations();\n"
 "updateInterval = setInterval(() => { updateStatus(); }, 1000);\n"
@@ -452,27 +469,43 @@ static enum MHD_Result handle_request(void *cls, struct MHD_Connection *connecti
 	/* Handle POST data accumulation */
 	if (strcmp(method, "POST") == 0) {
 		if (!pd) {
+			/* First call for this POST request - initialize and wait for data */
 			pd = calloc(1, sizeof(struct post_data));
 			if (!pd) return MHD_NO;
 			pd->data = NULL;
 			pd->size = 0;
 			*con_cls = pd;
+			/* Return MHD_YES to wait for POST data */
+			return MHD_YES;
 		}
 		
+		/* Accumulate raw POST data (for JSON) */
 		if (*upload_data_size > 0) {
-			/* Accumulate POST data */
-			if (pd->size + *upload_data_size < 4096) {
-				pd->data = realloc(pd->data, pd->size + *upload_data_size + 1);
-				if (pd->data) {
+			if (upload_data == NULL) {
+				if (pd) free_post_data(pd);
+				return MHD_NO;
+			}
+			size_t new_size = pd->size + *upload_data_size;
+			if (new_size < 4096) {
+				char *new_data = realloc(pd->data, new_size + 1);
+				if (new_data) {
+					pd->data = new_data;
 					memcpy(pd->data + pd->size, upload_data, *upload_data_size);
-					pd->size += *upload_data_size;
+					pd->size = new_size;
 					pd->data[pd->size] = '\0';
+				} else {
+					if (pd) free_post_data(pd);
+					return MHD_NO;
 				}
+			} else {
+				if (pd) free_post_data(pd);
+				return send_json_response(connection, "{\"error\":\"POST data too large\"}", MHD_HTTP_REQUEST_ENTITY_TOO_LARGE);
 			}
 			*upload_data_size = 0;
 			return MHD_YES; /* Continue receiving data */
 		}
-		/* POST data complete, fall through to process request */
+		/* POST data complete (*upload_data_size == 0) - all chunks received */
+		/* Fall through to process request - pd should contain all accumulated POST data */
 	}
 	
 	if (strcmp(method, "GET") == 0) {
@@ -532,7 +565,18 @@ static enum MHD_Result handle_request(void *cls, struct MHD_Connection *connecti
 			}
 		} else if (strcmp(url, "/api/station") == 0) {
 			/* Simple JSON parsing for station ID */
-			const char *json_data = pd && pd->data ? pd->data : "";
+			/* Check if we have POST data - pd should exist for POST requests */
+			if (!pd) {
+				return send_json_response(connection, "{\"error\":\"POST data handler not initialized\"}", MHD_HTTP_INTERNAL_SERVER_ERROR);
+			}
+			/* When *upload_data_size == 0, all POST data has been received */
+			/* But if pd->size is still 0, we haven't received any data yet - wait for it */
+			if (pd->size == 0 || !pd->data) {
+				/* No data received yet - return MHD_YES to wait for POST data */
+				return MHD_YES;
+			}
+			
+			const char *json_data = pd->data;
 			const char *id_start = strstr(json_data, "\"id\"");
 			if (id_start) {
 				const char *colon = strchr(id_start, ':');
@@ -542,7 +586,7 @@ static enum MHD_Result handle_request(void *cls, struct MHD_Connection *connecti
 						const char *quote_end = strchr(quote_start + 1, '"');
 						if (quote_end) {
 							size_t id_len = quote_end - quote_start - 1;
-							if (id_len < 128) {
+							if (id_len > 0 && id_len < 128) {
 								char station_id[128];
 								memcpy(station_id, quote_start + 1, id_len);
 								station_id[id_len] = '\0';
@@ -552,21 +596,30 @@ static enum MHD_Result handle_request(void *cls, struct MHD_Connection *connecti
 									PianoStation_t *station = PianoFindStationById(g_app->ph.stations, station_id);
 									if (station) {
 										g_app->nextStation = station;
-										/* Skip current song and drain playlist to switch stations */
+										/* Skip current song to stop playback and trigger station change */
 										if (g_app->settings.keys[BAR_KS_SKIP] != BAR_KS_DISABLED) {
 											BarUiDispatch(g_app, g_app->settings.keys[BAR_KS_SKIP],
 												g_app->curStation, g_app->playlist, false, BAR_DC_GLOBAL | BAR_DC_STATION);
 										}
-										/* Drain remaining playlist */
+										/* Clear playlist to ensure main loop fetches new playlist for next station */
 										if (g_app->playlist != NULL) {
-											PianoDestroyPlaylist(PianoListNextP(g_app->playlist));
-											g_app->playlist->head.next = NULL;
+											PianoSong_t *next = PianoListNextP(g_app->playlist);
+											if (next != NULL) {
+												PianoDestroyPlaylist(next);
+											}
+											/* Free current song and set playlist to NULL */
+											PianoSong_t *current = g_app->playlist;
+											g_app->playlist = NULL;
+											/* Note: current song will be freed by main loop or skip action */
 										}
 										pthread_mutex_unlock(&g_app_mutex);
 										if (pd) free_post_data(pd);
 										return send_json_response(connection, "{\"success\":true}", MHD_HTTP_OK);
+									} else {
+										pthread_mutex_unlock(&g_app_mutex);
+										if (pd) free_post_data(pd);
+										return send_json_response(connection, "{\"error\":\"Station not found\"}", MHD_HTTP_NOT_FOUND);
 									}
-									pthread_mutex_unlock(&g_app_mutex);
 								}
 							}
 						}
@@ -574,7 +627,7 @@ static enum MHD_Result handle_request(void *cls, struct MHD_Connection *connecti
 				}
 			}
 			if (pd) free_post_data(pd);
-			return send_json_response(connection, "{\"error\":\"Invalid station ID\"}", MHD_HTTP_BAD_REQUEST);
+			return send_json_response(connection, "{\"error\":\"Invalid JSON format\"}", MHD_HTTP_BAD_REQUEST);
 		}
 		if (pd) free_post_data(pd);
 		return send_json_response(connection, "{\"error\":\"Invalid request\"}", MHD_HTTP_BAD_REQUEST);
@@ -613,6 +666,7 @@ void BarWebStart(void) {
 		NULL, NULL,
 		&handle_request, NULL,
 		MHD_OPTION_NOTIFY_COMPLETED, &free_post_data, NULL,
+		MHD_OPTION_CONNECTION_TIMEOUT, (unsigned int) 120,
 		MHD_OPTION_END);
 	
 	if (g_daemon != NULL) {
